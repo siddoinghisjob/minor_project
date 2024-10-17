@@ -4,6 +4,9 @@ import spacy
 nltk.download('stopwords')
 spacy.load('en_core_web_sm')
 
+from dotenv import load_dotenv
+import os
+load_dotenv()
 import pandas as pd
 import base64, random
 import time, datetime
@@ -78,7 +81,7 @@ def course_recommender(course_list):
     return rec_course
 
 
-connection = pymysql.connect(host='localhost', user='root', password='root')
+connection = pymysql.connect(host=os.getenv('API_HOST'), user=os.getenv('API_USER'), password=os.getenv('API_PASS'), db=os.getenv('API_DB'))
 cursor = connection.cursor()
 
 
@@ -110,11 +113,6 @@ def run():
     img = Image.open('./Logo/SRA_Logo.jpg')
     img = img.resize((250, 250))
     st.image(img)
-
-    # Create the DB
-    db_sql = """CREATE DATABASE IF NOT EXISTS SRA;"""
-    cursor.execute(db_sql)
-    connection.select_db("sra")
 
     # Create table
     DB_table_name = 'user_data'
