@@ -12,3 +12,6 @@ youtube-dl
 nltk==3.5
 spacy==2.3.5
 python-dotenv
+boto3==1.17.112
+cryptography==3.3.2 
+pyopenssl==20.0.1

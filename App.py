@@ -3,7 +3,7 @@ import nltk
 import spacy
 nltk.download('stopwords')
 spacy.load('en_core_web_sm')
-
+import tempfile
 from dotenv import load_dotenv
 import os
 load_dotenv()
@@ -23,7 +23,22 @@ import pymysql
 from Courses import ds_course, web_course, android_course, ios_course, uiux_course, resume_videos, interview_videos
 import pafy
 import plotly.express as px
+import boto3
+from io import BytesIO
 
+s3 = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv('AWS_S3_ID'),  # Replace with your Access Key
+    aws_secret_access_key=os.getenv('AWS_S3_KEY'),  # Replace with your Secret Key
+    region_name=os.getenv('AWS_REGION')  # e.g., 'us-east-1'
+)
+
+BUCKET_NAME = os.getenv('BUCKET_NAME')
+
+def upload_to_s3(file_buffer, bucket_name, object_name):
+    s3.upload_fileobj(file_buffer, bucket_name, object_name)
+    return True
+    
 def fetch_yt_video(link):
     video = pafy.new(link)
     return video.title
@@ -40,28 +55,27 @@ def get_table_download_link(df, filename, text):
     return href
 
 
-def pdf_reader(file):
+def pdf_reader(file_buffer):
     resource_manager = PDFResourceManager()
-    fake_file_handle = io.StringIO()
+    fake_file_handle = BytesIO()
     converter = TextConverter(resource_manager, fake_file_handle, laparams=LAParams())
     page_interpreter = PDFPageInterpreter(resource_manager, converter)
-    with open(file, 'rb') as fh:
-        for page in PDFPage.get_pages(fh,
-                                      caching=True,
-                                      check_extractable=True):
-            page_interpreter.process_page(page)
-            print(page)
-        text = fake_file_handle.getvalue()
-
-    # close open handles
+    
+    file_buffer.seek(0)  # Reset the buffer position
+    for page in PDFPage.get_pages(file_buffer, caching=True, check_extractable=True):
+        page_interpreter.process_page(page)
+    
+    text = fake_file_handle.getvalue().decode('utf-8')
+    
+    # Close open handles
     converter.close()
     fake_file_handle.close()
+    
     return text
 
 
-def show_pdf(file_path):
-    with open(file_path, "rb") as f:
-        base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+def show_pdf_s3(pdf_file_buffer):
+    base64_pdf = base64.b64encode(pdf_file_buffer.read()).decode('utf-8')
     pdf_display = F'<iframe src="data:application/pdf;base64,{base64_pdf}" width="700" height="1000" type="application/pdf"></iframe>'
     st.markdown(pdf_display, unsafe_allow_html=True)
 
@@ -108,48 +122,54 @@ def run():
     st.sidebar.markdown("# Choose User")
     activities = ["Normal User", "Admin"]
     choice = st.sidebar.selectbox("Choose among the given options:", activities)
-    # link = '[©Developed by Spidy20](http://github.com/spidy20)'
-    # st.sidebar.markdown(link, unsafe_allow_html=True)
     img = Image.open('./Logo/SRA_Logo.jpg')
     img = img.resize((250, 250))
     st.image(img)
 
     # Create table
     DB_table_name = 'user_data'
-    table_sql = "CREATE TABLE IF NOT EXISTS " + DB_table_name + """
-                    (ID INT NOT NULL AUTO_INCREMENT,
-                     Name varchar(100) NOT NULL,
-                     Email_ID VARCHAR(50) NOT NULL,
-                     resume_score VARCHAR(8) NOT NULL,
-                     Timestamp VARCHAR(50) NOT NULL,
-                     Page_no VARCHAR(5) NOT NULL,
-                     Predicted_Field VARCHAR(25) NOT NULL,
-                     User_level VARCHAR(30) NOT NULL,
-                     Actual_skills TEXT NOT NULL,
-                     Recommended_skills TEXT NOT NULL,
-                     Recommended_courses TEXT NOT NULL,
-                     PRIMARY KEY (ID));
-                    """
+    table_sql = f"""
+    CREATE TABLE IF NOT EXISTS {DB_table_name} (
+        ID INT NOT NULL AUTO_INCREMENT,
+        Name varchar(100) NOT NULL,
+        Email_ID VARCHAR(50) NOT NULL,
+        resume_score VARCHAR(8) NOT NULL,
+        Timestamp VARCHAR(50) NOT NULL,
+        Page_no VARCHAR(5) NOT NULL,
+        Predicted_Field VARCHAR(25) NOT NULL,
+        User_level VARCHAR(30) NOT NULL,
+        Actual_skills TEXT NOT NULL,
+        Recommended_skills TEXT NOT NULL,
+        Recommended_courses TEXT NOT NULL,
+        PRIMARY KEY (ID)
+    );
+    """
     cursor.execute(table_sql)
+
     if choice == 'Normal User':
-        # st.markdown('''<h4 style='text-align: left; color: #d73b5c;'>* Upload your resume, and get smart recommendation based on it."</h4>''',
-        #             unsafe_allow_html=True)
         pdf_file = st.file_uploader("Choose your Resume", type=["pdf"])
         if pdf_file is not None:
-            # with st.spinner('Uploading your Resume....'):
-            #     time.sleep(4)
-            save_image_path = './Uploaded_Resumes/' + pdf_file.name
-            with open(save_image_path, "wb") as f:
-                f.write(pdf_file.getbuffer())
-            show_pdf(save_image_path)
-            resume_data = ResumeParser(save_image_path).get_extracted_data()
-            if resume_data:
-                ## Get the whole resume data
-                resume_text = pdf_reader(save_image_path)
-
-                st.header("**Resume Analysis**")
-                st.success("Hello " + resume_data['name'])
-                st.subheader("**Your Basic info**")
+            # Create an in-memory file buffer
+            file_buffer = BytesIO(pdf_file.getvalue())
+            # Upload the resume to S3
+            object_name = pdf_file.name
+            if upload_to_s3(BytesIO(pdf_file.getvalue()), BUCKET_NAME, object_name):
+                st.success(f"Resume uploaded successfully to {BUCKET_NAME}!")
+                # Show PDF in the app (using in-memory buffer)
+                show_pdf_s3(BytesIO(pdf_file.getvalue()))
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+                    temp_file.write(pdf_file.getvalue())
+                    temp_file_path = temp_file.name
+                
+                # Parse resume in memory
+                resume_data = ResumeParser(temp_file_path).get_extracted_data()
+                if resume_data:
+                    resume_text = pdf_reader(BytesIO(pdf_file.getvalue()))
+                    
+                    st.header("**Resume Analysis**")
+                    st.success("Hello " + resume_data['name'])
+                    st.subheader("**Your Basic info**")
                 try:
                     st.text('Name: ' + resume_data['name'])
                     st.text('Email: ' + resume_data['email'])
@@ -365,7 +385,8 @@ def run():
                 insert_data(resume_data['name'], resume_data['email'], str(resume_score), timestamp,
                             str(resume_data['no_of_pages']), reco_field, cand_level, str(resume_data['skills']),
                             str(recommended_skills), str(rec_course))
-
+                
+                os.remove(temp_file_path)
                 connection.commit()
             else:
                 st.error('Something went wrong..')

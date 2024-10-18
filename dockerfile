@@ -16,8 +16,6 @@ RUN git clone https://github.com/siddoinghisjob/minor_project.git .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /app/Uploaded_Resumes
-
 RUN python -m spacy download en
 
 EXPOSE 8501
