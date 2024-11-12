@@ -81,7 +81,7 @@ def course_recommender(course_list):
     return rec_course
 
 
-connection = pymysql.connect(host=os.getenv('API_HOST'), user=os.getenv('API_USER'), password=os.getenv('API_PASS'), db=os.getenv('API_DB'))
+connection = pymysql.connect(host=os.getenv('API_HOST'), user=os.getenv('API_USER'), password=os.getenv('API_PASS'), db=os.getenv('API_DB'), port=os.getenv('API_PORT'))
 cursor = connection.cursor()
 
 
